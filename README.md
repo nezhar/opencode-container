@@ -148,6 +148,13 @@ opencode-container --auth-port 1455 --auth-forward
 docker compose build
 ```
 
+## Shell Completion
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+cp completions/opencode-container ~/.local/share/bash-completion/completions/
+```
+
 ## Related Projects
 
 - `claude-container`

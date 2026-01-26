@@ -1,0 +1,51 @@
+#!/bin/bash
+# Bash completion script for opencode-container
+# Install to ~/.local/share/bash-completion/completions/opencode-container
+# or /etc/bash_completion.d/opencode-container (system-wide)
+
+_opencode_container_completion() {
+    local cur prev words cword
+    _init_completion || return
+
+    local flags="
+        --workspace -w
+        --config -c
+        --data -d
+        --proxy
+        --proxy-all
+        --proxy-provider
+        --proxy-target
+        --proxy-base-url
+        --proxy-data
+        --datasette
+        --pull
+        --shell
+        --auth-forward
+        --auth-port
+        --help -h
+    "
+
+    local dir_flags="--workspace -w --config -c --data -d --proxy-data"
+    local port_flags="--auth-port"
+
+    case "$prev" in
+        --workspace|-w|--config|-c|--data|-d|--proxy-data)
+            _filedir -d
+            return 0
+            ;;
+        --auth-port)
+            COMPREPLY=($(compgen -W "1455 8000 8001 8080" -- "$cur"))
+            return 0
+            ;;
+    esac
+
+    if [[ "$cur" == -* ]]; then
+        COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+        return 0
+    fi
+
+    COMPREPLY=($(compgen -W "$flags" -- "$cur"))
+    return 0
+}
+
+complete -F _opencode_container_completion opencode-container
