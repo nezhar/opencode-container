@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+
+set -e
+
+CONFIG_DIR_DEFAULT="${HOME}/.config/opencode-container"
+DATA_DIR_DEFAULT="${HOME}/.local/share/opencode"
+WORKSPACE_DIR="${PWD}"
+CONFIG_DIR="$CONFIG_DIR_DEFAULT"
+DATA_DIR="$DATA_DIR_DEFAULT"
+PULL_LATEST=false
+SHELL_MODE=false
+
+show_usage() {
+    cat << 'EOH'
+Usage: opencode-container [OPTIONS] [COMMAND]
+
+Run OpenCode CLI in a containerized environment.
+
+OPTIONS:
+    -w, --workspace <path>  Set workspace directory (default: current directory)
+    -c, --config <path>     Set config directory (default: ~/.config/opencode-container)
+    -d, --data <path>       Set data directory (default: ~/.local/share/opencode)
+    --pull                  Pull latest image before running
+    --shell                 Drop into container shell instead of starting opencode
+    -h, --help              Show this help message
+
+COMMAND:
+    Any command to pass to opencode (default: interactive mode)
+
+EXAMPLES:
+    opencode-container
+    opencode-container --pull
+    opencode-container -w /path/to/project
+    opencode-container "analyze the code"
+    opencode-container --shell
+
+EOH
+}
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -w|--workspace)
+            WORKSPACE_DIR="$2"
+            shift 2
+            ;;
+        -c|--config)
+            CONFIG_DIR="$2"
+            shift 2
+            ;;
+        -d|--data)
+            DATA_DIR="$2"
+            shift 2
+            ;;
+        --pull)
+            PULL_LATEST=true
+            shift
+            ;;
+        --shell)
+            SHELL_MODE=true
+            shift
+            ;;
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+mkdir -p "${CONFIG_DIR}"
+mkdir -p "${DATA_DIR}"
+
+VERSION="${OPENCODE_CONTAINER_VERSION:-latest}"
+IMAGE="${OPENCODE_IMAGE:-nezhar/opencode-cli:${VERSION}}"
+
+if [[ "$PULL_LATEST" == true ]]; then
+    docker pull "$IMAGE"
+fi
+
+DOCKER_ARGS=(
+    --rm -it
+    -e "USER_UID=$(id -u)"
+    -e "USER_GID=$(id -g)"
+    -e "HOME=/config"
+    -e "OPENCODE_CONFIG_DIR=/config"
+    -e "XDG_DATA_HOME=/data"
+    -v "${WORKSPACE_DIR}:/workspace"
+    -v "${CONFIG_DIR}:/config"
+    -v "${DATA_DIR}:/data"
+)
+
+if [[ "$SHELL_MODE" == true ]]; then
+    docker run "${DOCKER_ARGS[@]}" "$IMAGE" /bin/bash
+else
+    docker run "${DOCKER_ARGS[@]}" "$IMAGE" "$@"
+fi

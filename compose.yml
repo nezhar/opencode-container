@@ -1,0 +1,6 @@
+services:
+  opencode-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: "nezhar/opencode-cli:${OPENCODE_CONTAINER_VERSION:-latest}"
