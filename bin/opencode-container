@@ -9,6 +9,20 @@ CONFIG_DIR="$CONFIG_DIR_DEFAULT"
 DATA_DIR="$DATA_DIR_DEFAULT"
 PULL_LATEST=false
 SHELL_MODE=false
+FORWARD_AUTH=false
+AUTH_PORT=1455
+ENABLE_PROXY=false
+ENABLE_DATASETTE=false
+PROXY_PROVIDER="${OPENCODE_PROXY_PROVIDER:-}"
+PROXY_TARGET="${OPENCODE_PROXY_TARGET:-}"
+PROXY_BASE_URL="${OPENCODE_PROXY_BASE_URL:-}"
+PROXY_DATA_DIR="${OPENCODE_PROXY_DATA:-}"
+PROXY_MODE="${OPENCODE_PROXY_MODE:-reverse}"
+PROXY_PORT="${OPENCODE_PROXY_PORT:-8080}"
+DATASETTE_PORT="${OPENCODE_DATASETTE_PORT:-8001}"
+NETWORK_NAME="opencode-network"
+PROXY_CONTAINER_NAME="opencode-proxy"
+DATASETTE_CONTAINER_NAME="opencode-datasette"
 
 show_usage() {
     cat << 'EOH'
@@ -20,8 +34,17 @@ OPTIONS:
     -w, --workspace <path>  Set workspace directory (default: current directory)
     -c, --config <path>     Set config directory (default: ~/.config/opencode-container)
     -d, --data <path>       Set data directory (default: ~/.local/share/opencode)
+    --proxy                 Enable API logging via proxy
+    --proxy-all             Intercept all CLI traffic via forward proxy (mitmproxy)
+    --proxy-provider <id>   Provider ID to route through proxy (required for --proxy)
+    --proxy-target <url>    Upstream base URL for proxy (e.g. https://api.openai.com)
+    --proxy-base-url <url>  Base URL to set in OpenCode config (default: http://opencode-proxy:8080/v1)
+    --proxy-data <path>     Directory for proxy logs (default: ~/.config/opencode-container/proxy)
+    --datasette             Start Datasette web UI for logs (implies --proxy)
     --pull                  Pull latest image before running
     --shell                 Drop into container shell instead of starting opencode
+    --auth-forward          Publish auth server port to host (default: 1455)
+    --auth-port <port>      Override auth server port (default: 1455)
     -h, --help              Show this help message
 
 COMMAND:
@@ -33,6 +56,11 @@ EXAMPLES:
     opencode-container -w /path/to/project
     opencode-container "analyze the code"
     opencode-container --shell
+    opencode-container --auth-forward
+    opencode-container --auth-port 1455 --auth-forward
+    opencode-container --proxy --proxy-provider openai --proxy-target https://api.openai.com
+    opencode-container --datasette --proxy-provider openai --proxy-target https://api.openai.com
+    opencode-container --proxy-all
 
 EOH
 }
@@ -51,6 +79,36 @@ while [[ $# -gt 0 ]]; do
             DATA_DIR="$2"
             shift 2
             ;;
+        --proxy)
+            ENABLE_PROXY=true
+            shift
+            ;;
+        --proxy-all)
+            ENABLE_PROXY=true
+            PROXY_MODE="forward"
+            shift
+            ;;
+        --proxy-provider)
+            PROXY_PROVIDER="$2"
+            shift 2
+            ;;
+        --proxy-target)
+            PROXY_TARGET="$2"
+            shift 2
+            ;;
+        --proxy-base-url)
+            PROXY_BASE_URL="$2"
+            shift 2
+            ;;
+        --proxy-data)
+            PROXY_DATA_DIR="$2"
+            shift 2
+            ;;
+        --datasette)
+            ENABLE_PROXY=true
+            ENABLE_DATASETTE=true
+            shift
+            ;;
         --pull)
             PULL_LATEST=true
             shift
@@ -58,6 +116,14 @@ while [[ $# -gt 0 ]]; do
         --shell)
             SHELL_MODE=true
             shift
+            ;;
+        --auth-forward)
+            FORWARD_AUTH=true
+            shift
+            ;;
+        --auth-port)
+            AUTH_PORT="$2"
+            shift 2
             ;;
         -h|--help)
             show_usage
@@ -69,11 +135,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -z "$PROXY_DATA_DIR" ]]; then
+    PROXY_DATA_DIR="${CONFIG_DIR}/proxy"
+fi
+PROXY_CERTS_DIR="${PROXY_DATA_DIR}/certs"
+
 mkdir -p "${CONFIG_DIR}"
 mkdir -p "${DATA_DIR}"
 
 VERSION="${OPENCODE_CONTAINER_VERSION:-latest}"
 IMAGE="${OPENCODE_IMAGE:-nezhar/opencode-cli:${VERSION}}"
+PROXY_IMAGE="${OPENCODE_PROXY_IMAGE:-nezhar/opencode-proxy:${VERSION}}"
+DATASETTE_IMAGE="${OPENCODE_DATASETTE_IMAGE:-nezhar/opencode-datasette:${VERSION}}"
+PROXY_CONFIG_FILE_HOST="${CONFIG_DIR}/opencode-proxy.json"
+PROXY_CONFIG_FILE_CONTAINER="/config/opencode-proxy.json"
 
 if [[ "$PULL_LATEST" == true ]]; then
     docker pull "$IMAGE"
@@ -91,8 +166,113 @@ DOCKER_ARGS=(
     -v "${DATA_DIR}:/data"
 )
 
+if [[ "$ENABLE_PROXY" == true ]]; then
+    if [[ "$PROXY_MODE" != "forward" ]]; then
+        if [[ -z "$PROXY_PROVIDER" ]]; then
+            echo "Error: --proxy-provider is required when using --proxy" >&2
+            exit 1
+        fi
+        if [[ -z "$PROXY_TARGET" ]]; then
+            echo "Error: --proxy-target is required when using --proxy" >&2
+            exit 1
+        fi
+        if [[ -z "$PROXY_BASE_URL" ]]; then
+            PROXY_BASE_URL="http://${PROXY_CONTAINER_NAME}:${PROXY_PORT}/v1"
+        fi
+
+        cat > "${PROXY_CONFIG_FILE_HOST}" << EOF
+{
+  "provider": {
+    "${PROXY_PROVIDER}": {
+      "options": {
+        "baseURL": "${PROXY_BASE_URL}"
+      }
+    }
+  }
+}
+EOF
+        echo "Starting with API logging enabled (provider: ${PROXY_PROVIDER})"
+    else
+        echo "Starting with API logging enabled (forward proxy mode)"
+    fi
+
+    mkdir -p "${PROXY_DATA_DIR}" "${PROXY_CERTS_DIR}"
+
+    docker network create "$NETWORK_NAME" 2>/dev/null || true
+
+    docker run -d --rm \
+        --name "$PROXY_CONTAINER_NAME" \
+        --network "$NETWORK_NAME" \
+        -p "${PROXY_PORT}:${PROXY_PORT}" \
+        -v "${PROXY_DATA_DIR}:/proxy/logs" \
+        -v "${PROXY_CERTS_DIR}:/proxy/certs" \
+        -e "TARGET_API_URL=${PROXY_TARGET}" \
+        -e "PROXY_PORT=${PROXY_PORT}" \
+        -e "PROXY_MODE=${PROXY_MODE}" \
+        "$PROXY_IMAGE" 2>/dev/null || true
+
+    if [[ "$ENABLE_DATASETTE" == true ]]; then
+        docker run -d --rm \
+            --name "$DATASETTE_CONTAINER_NAME" \
+            --network "$NETWORK_NAME" \
+            -p "${DATASETTE_PORT}:8001" \
+            -v "${PROXY_DATA_DIR}:/data" \
+            "$DATASETTE_IMAGE" 2>/dev/null || true
+
+        echo "Datasette available at http://localhost:${DATASETTE_PORT}"
+    fi
+
+    sleep 2
+fi
+
+if [[ "$FORWARD_AUTH" == true ]]; then
+    DOCKER_ARGS+=(
+        -p "${AUTH_PORT}:${AUTH_PORT}"
+    )
+fi
+
+if [[ "$ENABLE_PROXY" == true ]]; then
+    CA_CERT_PATH=""
+    if [[ -f "${PROXY_CERTS_DIR}/mitmproxy-ca-cert.pem" ]]; then
+        CA_CERT_PATH="/mitmproxy/mitmproxy-ca-cert.pem"
+    elif [[ -f "${PROXY_CERTS_DIR}/mitmproxy-ca.pem" ]]; then
+        CA_CERT_PATH="/mitmproxy/mitmproxy-ca.pem"
+    else
+        echo "Warning: mitmproxy CA cert not found yet in ${PROXY_CERTS_DIR}"
+        echo "         HTTPS requests may fail until the cert is generated."
+    fi
+
+    DOCKER_ARGS+=(
+        --network "$NETWORK_NAME"
+        -v "${PROXY_CERTS_DIR}:/mitmproxy:ro"
+    )
+    if [[ -n "$CA_CERT_PATH" ]]; then
+        DOCKER_ARGS+=(
+            -e "NODE_EXTRA_CA_CERTS=${CA_CERT_PATH}"
+        )
+    fi
+    if [[ "$PROXY_MODE" != "forward" ]]; then
+        DOCKER_ARGS+=(
+            -e "OPENCODE_CONFIG=${PROXY_CONFIG_FILE_CONTAINER}"
+        )
+    else
+        DOCKER_ARGS+=(
+            -e "HTTP_PROXY=http://${PROXY_CONTAINER_NAME}:${PROXY_PORT}"
+            -e "HTTPS_PROXY=http://${PROXY_CONTAINER_NAME}:${PROXY_PORT}"
+        )
+    fi
+fi
+
 if [[ "$SHELL_MODE" == true ]]; then
     docker run "${DOCKER_ARGS[@]}" "$IMAGE" /bin/bash
 else
     docker run "${DOCKER_ARGS[@]}" "$IMAGE" "$@"
+fi
+
+if [[ "$ENABLE_PROXY" == true ]]; then
+    echo "Proxy services are still running. To stop them, run:"
+    echo "  docker stop $PROXY_CONTAINER_NAME"
+    if [[ "$ENABLE_DATASETTE" == true ]]; then
+        echo "  docker stop $DATASETTE_CONTAINER_NAME"
+    fi
 fi

@@ -4,3 +4,13 @@ services:
       context: .
       dockerfile: Dockerfile
     image: "nezhar/opencode-cli:${OPENCODE_CONTAINER_VERSION:-latest}"
+  opencode-proxy:
+    build:
+      context: .
+      dockerfile: opencode-proxy/Dockerfile
+    image: "nezhar/opencode-proxy:${OPENCODE_CONTAINER_VERSION:-latest}"
+  opencode-datasette:
+    build:
+      context: .
+      dockerfile: opencode-datasette/Dockerfile
+    image: "nezhar/opencode-datasette:${OPENCODE_CONTAINER_VERSION:-latest}"
