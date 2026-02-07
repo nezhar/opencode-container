@@ -43,8 +43,6 @@ docker run --rm -it \
 opencode-container --help
 opencode-container --pull
 opencode-container --shell
-opencode-container --auth-forward
-opencode-container --auth-port 1455 --auth-forward
 opencode-container "analyze the code"
 opencode-container --proxy --proxy-provider openai --proxy-target https://api.openai.com
 opencode-container --datasette --proxy-provider openai --proxy-target https://api.openai.com
@@ -76,6 +74,8 @@ opencode-container --datasette \
 ```
 
 Datasette is available at `http://localhost:8001`.
+
+No other host ports are published by default.
 
 If your provider uses a different base path, override the base URL injected into OpenCode:
 
@@ -126,20 +126,6 @@ OPENCODE_PROXY_PORT
 OPENCODE_DATASETTE_PORT
 OPENCODE_PROXY_IMAGE
 OPENCODE_DATASETTE_IMAGE
-```
-
-## Auth Callback Port
-
-If OpenCode starts a local auth server (default `127.0.0.1:1455`), publish it with:
-
-```bash
-opencode-container --auth-forward
-```
-
-If you need a different port:
-
-```bash
-opencode-container --auth-port 1455 --auth-forward
 ```
 
 ## Build Locally

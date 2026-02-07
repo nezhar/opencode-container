@@ -9,8 +9,6 @@ CONFIG_DIR="$CONFIG_DIR_DEFAULT"
 DATA_DIR="$DATA_DIR_DEFAULT"
 PULL_LATEST=false
 SHELL_MODE=false
-FORWARD_AUTH=false
-AUTH_PORT=1455
 ENABLE_PROXY=false
 ENABLE_DATASETTE=false
 PROXY_PROVIDER="${OPENCODE_PROXY_PROVIDER:-}"
@@ -43,8 +41,6 @@ OPTIONS:
     --datasette             Start Datasette web UI for logs (implies --proxy)
     --pull                  Pull latest image before running
     --shell                 Drop into container shell instead of starting opencode
-    --auth-forward          Publish auth server port to host (default: 1455)
-    --auth-port <port>      Override auth server port (default: 1455)
     -h, --help              Show this help message
 
 COMMAND:
@@ -56,8 +52,6 @@ EXAMPLES:
     opencode-container -w /path/to/project
     opencode-container "analyze the code"
     opencode-container --shell
-    opencode-container --auth-forward
-    opencode-container --auth-port 1455 --auth-forward
     opencode-container --proxy --proxy-provider openai --proxy-target https://api.openai.com
     opencode-container --datasette --proxy-provider openai --proxy-target https://api.openai.com
     opencode-container --proxy-all
@@ -116,14 +110,6 @@ while [[ $# -gt 0 ]]; do
         --shell)
             SHELL_MODE=true
             shift
-            ;;
-        --auth-forward)
-            FORWARD_AUTH=true
-            shift
-            ;;
-        --auth-port)
-            AUTH_PORT="$2"
-            shift 2
             ;;
         -h|--help)
             show_usage
@@ -203,7 +189,6 @@ EOF
     docker run -d --rm \
         --name "$PROXY_CONTAINER_NAME" \
         --network "$NETWORK_NAME" \
-        -p "${PROXY_PORT}:${PROXY_PORT}" \
         -v "${PROXY_DATA_DIR}:/proxy/logs" \
         -v "${PROXY_CERTS_DIR}:/proxy/certs" \
         -e "TARGET_API_URL=${PROXY_TARGET}" \
@@ -223,12 +208,6 @@ EOF
     fi
 
     sleep 2
-fi
-
-if [[ "$FORWARD_AUTH" == true ]]; then
-    DOCKER_ARGS+=(
-        -p "${AUTH_PORT}:${AUTH_PORT}"
-    )
 fi
 
 if [[ "$ENABLE_PROXY" == true ]]; then

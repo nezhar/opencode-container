@@ -20,21 +20,14 @@ _opencode_container_completion() {
         --datasette
         --pull
         --shell
-        --auth-forward
-        --auth-port
         --help -h
     "
 
     local dir_flags="--workspace -w --config -c --data -d --proxy-data"
-    local port_flags="--auth-port"
 
     case "$prev" in
         --workspace|-w|--config|-c|--data|-d|--proxy-data)
             _filedir -d
-            return 0
-            ;;
-        --auth-port)
-            COMPREPLY=($(compgen -W "1455 8000 8001 8080" -- "$cur"))
             return 0
             ;;
     esac
